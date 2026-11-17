@@ -821,3 +821,293 @@ def offline_finance_reply(question: str) -> str:
         return (
             "**Simple vs. Compound Interest:**\n"
             "- **Simple Interest:** Earned only on your original principal (`P × R × T / 100`).\n"
+
+
+# Video Academy - Admin Management System
+
+videos = []
+resources = []
+users = []
+playlists = []
+
+CATS = [
+    "Financial Literacy",
+    "Stock Market",
+    "Mutual Funds",
+    "SIP",
+    "ETFs & Index Funds",
+    "Banking & Digital Payments",
+    "Budgeting & Savings",
+    "Financial Safety"
+]
+
+LEVELS = ["beginner", "intermediate", "advanced"]
+
+
+def add_video():
+    print("\n--- Add New Video ---")
+
+    url = input("Enter YouTube link: ")
+    category = input("Enter category: ")
+    difficulty = input("Enter difficulty: ")
+    duration = input("Enter duration: ")
+    description = input("Enter description: ")
+    status = input("Enter status (draft/published): ")
+
+    video = {
+        "url": url,
+        "category": category,
+        "difficulty": difficulty,
+        "duration": duration,
+        "description": description,
+        "status": status
+    }
+
+    videos.append(video)
+    print("Video added successfully!")
+
+
+def view_videos():
+    print("\n--- Video List ---")
+
+    if not videos:
+        print("No videos available.")
+        return
+
+    for i, video in enumerate(videos, 1):
+        print("\nVideo", i)
+        print("URL:", video["url"])
+        print("Category:", video["category"])
+        print("Difficulty:", video["difficulty"])
+        print("Duration:", video["duration"])
+        print("Description:", video["description"])
+        print("Status:", video["status"])
+
+
+def update_video():
+    view_videos()
+
+    if not videos:
+        return
+
+    number = int(input("\nEnter video number to update: "))
+
+    if 1 <= number <= len(videos):
+        video = videos[number - 1]
+
+        print("1. Change Category")
+        print("2. Change Difficulty")
+        print("3. Change Status")
+
+        choice = input("Enter choice: ")
+
+        if choice == "1":
+            video["category"] = input("Enter new category: ")
+        elif choice == "2":
+            video["difficulty"] = input("Enter new difficulty: ")
+        elif choice == "3":
+            video["status"] = (
+                "published" if video["status"] == "draft"
+                else "draft"
+            )
+
+        print("Video updated successfully!")
+    else:
+        print("Invalid video number.")
+
+
+def delete_video():
+    view_videos()
+
+    if not videos:
+        return
+
+    number = int(input("\nEnter video number to delete: "))
+
+    if 1 <= number <= len(videos):
+        videos.pop(number - 1)
+        print("Video deleted successfully!")
+    else:
+        print("Invalid video number.")
+
+
+def add_resource():
+    print("\n--- Add Expert Resource ---")
+
+    name = input("Enter creator/organisation name: ")
+    kind = input("Enter resource type: ")
+    platform = input("Enter platform: ")
+    url = input("Enter resource URL: ")
+    description = input("Enter description: ")
+
+    resource = {
+        "name": name,
+        "kind": kind,
+        "platform": platform,
+        "url": url,
+        "description": description,
+        "verified": False,
+        "status": "draft"
+    }
+
+    resources.append(resource)
+    print("Resource added successfully!")
+
+
+def view_resources():
+    print("\n--- Expert Resources ---")
+
+    if not resources:
+        print("No resources available.")
+        return
+
+    for i, resource in enumerate(resources, 1):
+        print("\nResource", i)
+        print("Name:", resource["name"])
+        print("Type:", resource["kind"])
+        print("Platform:", resource["platform"])
+        print("URL:", resource["url"])
+        print("Verified:", resource["verified"])
+        print("Status:", resource["status"])
+
+
+def verify_resource():
+    view_resources()
+
+    if not resources:
+        return
+
+    number = int(input("\nEnter resource number: "))
+
+    if 1 <= number <= len(resources):
+        resources[number - 1]["verified"] = True
+        print("Resource verified successfully!")
+    else:
+        print("Invalid resource number.")
+
+
+def publish_resource():
+    view_resources()
+
+    if not resources:
+        return
+
+    number = int(input("\nEnter resource number: "))
+
+    if 1 <= number <= len(resources):
+        resource = resources[number - 1]
+
+        if resource["verified"]:
+            resource["status"] = "published"
+            print("Resource published successfully!")
+        else:
+            print("Verify the resource before publishing.")
+    else:
+        print("Invalid resource number.")
+
+
+def view_playlists():
+    print("\n--- Playlists ---")
+
+    if not playlists:
+        print("No playlists available.")
+    else:
+        for playlist in playlists:
+            print(playlist)
+
+
+def add_user():
+    print("\n--- Add User ---")
+
+    name = input("Enter user name: ")
+    email = input("Enter email: ")
+    role = input("Enter role (admin/user): ")
+
+    users.append({
+        "name": name,
+        "email": email,
+        "role": role
+    })
+
+    print("User added successfully!")
+
+
+def view_users():
+    print("\n--- Users ---")
+
+    if not users:
+        print("No users available.")
+        return
+
+    for i, user in enumerate(users, 1):
+        print("\nUser", i)
+        print("Name:", user["name"])
+        print("Email:", user["email"])
+        print("Role:", user["role"])
+
+
+def change_user_role():
+    view_users()
+
+    if not users:
+        return
+
+    number = int(input("\nEnter user number: "))
+
+    if 1 <= number <= len(users):
+        users[number - 1]["role"] = input("Enter new role: ")
+        print("User role updated successfully!")
+    else:
+        print("Invalid user number.")
+
+
+# Main Admin Menu
+
+while True:
+    print("\n========== VIDEO ACADEMY ADMIN ==========")
+    print("1. Add Video")
+    print("2. View Videos")
+    print("3. Update Video")
+    print("4. Delete Video")
+    print("5. Add Expert Resource")
+    print("6. View Resources")
+    print("7. Verify Resource")
+    print("8. Publish Resource")
+    print("9. View Playlists")
+    print("10. Add User")
+    print("11. View Users")
+    print("12. Change User Role")
+    print("13. Exit")
+
+    choice = input("\nEnter your choice: ")
+
+    if choice == "1":
+        add_video()
+    elif choice == "2":
+        view_videos()
+    elif choice == "3":
+        update_video()
+    elif choice == "4":
+        delete_video()
+    elif choice == "5":
+        add_resource()
+    elif choice == "6":
+        view_resources()
+    elif choice == "7":
+        verify_resource()
+    elif choice == "8":
+        publish_resource()
+    elif choice == "9":
+        view_playlists()
+    elif choice == "10":
+        add_user()
+    elif choice == "11":
+        view_users()
+    elif choice == "12":
+        change_user_role()
+    elif choice == "13":
+        print("Thank you for using Video Academy Admin!")
+        break
+    else:
+        print("Invalid choice. Please try again.")
+
