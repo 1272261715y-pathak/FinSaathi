@@ -1111,3 +1111,225 @@ while True:
     else:
         print("Invalid choice. Please try again.")
 
+pip install flask reportlab pillow qrcode
+
+
+from flask import Flask, request, send_file, jsonify
+from reportlab.lib.pagesizes import landscape
+from reportlab.pdfgen import canvas
+from reportlab.lib.colors import HexColor
+from reportlab.lib.units import inch
+from PIL import Image, ImageDraw, ImageFont
+from datetime import datetime
+import qrcode
+import io
+import uuid
+
+app = Flask(__name__)
+
+certificates = {}
+
+def generate_certificate(name, course, cert_id):
+    width, height = 1600, 1130
+    buffer = io.BytesIO()
+
+    pdf = canvas.Canvas(
+        buffer,
+        pagesize=(width, height)
+    )
+
+    # Background
+    pdf.setFillColor(HexColor("#fbf8f1"))
+    pdf.rect(0, 0, width, height, fill=1, stroke=0)
+
+    # Outer border
+    pdf.setStrokeColor(HexColor("#0b1730"))
+    pdf.setLineWidth(12)
+    pdf.rect(36, 36, width-72, height-72)
+
+    # Inner border
+    pdf.setStrokeColor(HexColor("#c9a227"))
+    pdf.setLineWidth(3)
+    pdf.rect(70, 70, width-140, height-140)
+
+    # Header
+    pdf.setFillColor(HexColor("#0b1730"))
+    pdf.rect(70, height-220, width-140, 150, fill=1)
+
+    # Brand
+    pdf.setFillColor(HexColor("#ffffff"))
+    pdf.setFont("Helvetica-Bold", 42)
+    pdf.drawString(150, height-160, "FinSaathi")
+
+    pdf.setFillColor(HexColor("#93c5fd"))
+    pdf.setFont("Helvetica", 18)
+    pdf.drawRightString(
+        width-120, height-160,
+        "FINANCIAL LITERACY - INDIA"
+    )
+
+    # Certificate title
+    pdf.setFillColor(HexColor("#c9a227"))
+    pdf.setFont("Helvetica-Bold", 26)
+    pdf.drawCentredString(
+        width/2, height-320,
+        "CERTIFICATE OF COMPLETION"
+    )
+
+    # Student name
+    pdf.setFillColor(HexColor("#0b1730"))
+    pdf.setFont("Helvetica-Bold", 55)
+    pdf.drawCentredString(
+        width/2, height-450, name
+    )
+
+    # Divider
+    pdf.setStrokeColor(HexColor("#c9a227"))
+    pdf.line(450, height-485, 1150, height-485)
+
+    # Description
+    pdf.setFillColor(HexColor("#475569"))
+    pdf.setFont("Helvetica", 24)
+    pdf.drawCentredString(
+        width/2, height-550,
+        "has successfully completed the learning program"
+    )
+
+    # Course name
+    pdf.setFillColor(HexColor("#1d4ed8"))
+    pdf.setFont("Helvetica-Bold", 38)
+    pdf.drawCentredString(
+        width/2, height-650, course
+    )
+
+    # Achievement badge
+    pdf.setFillColor(HexColor("#c9a227"))
+    pdf.circle(width/2, 350, 65, fill=1)
+
+    pdf.setFillColor(HexColor("#0b1730"))
+    pdf.circle(width/2, 350, 52, fill=1)
+
+    pdf.setFillColor(HexColor("#c9a227"))
+    pdf.setFont("Helvetica-Bold", 55)
+    pdf.drawCentredString(width/2, 333, "✓")
+
+    # Issue date
+    issued = datetime.now().strftime("%d %B %Y")
+
+    pdf.setFillColor(HexColor("#64748b"))
+    pdf.setFont("Helvetica-Bold", 16)
+    pdf.drawString(150, 220, "ISSUED ON")
+
+    pdf.setFillColor(HexColor("#0b1730"))
+    pdf.setFont("Helvetica-Bold", 22)
+    pdf.drawString(150, 180, issued)
+
+    # Certificate ID
+    pdf.setFillColor(HexColor("#64748b"))
+    pdf.setFont("Helvetica-Bold", 16)
+    pdf.drawRightString(
+        width-150, 220, "CERTIFICATE ID"
+    )
+
+    pdf.setFillColor(HexColor("#0b1730"))
+    pdf.setFont("Helvetica-Bold", 22)
+    pdf.drawRightString(
+        width-150, 180, cert_id
+    )
+
+    # QR code for verification
+    qr = qrcode.make(
+        f"http://localhost:5000/verify/{cert_id}"
+    )
+
+    qr_buffer = io.BytesIO()
+    qr.save(qr_buffer, format="PNG")
+    qr_buffer.seek(0)
+
+    qr_image = Image.open(qr_buffer)
+
+    pdf.drawInlineImage(
+        qr_image,
+        width/2-35,
+        95,
+        width=70,
+        height=70
+    )
+
+    pdf.save()
+    buffer.seek(0)
+
+    return buffer
+
+
+@app.route("/create-certificate", methods=["POST"])
+def create_certificate():
+    data = request.json or {}
+
+    name = data.get("name", "").strip()
+    course = data.get("course", "").strip()
+
+    if len(name) < 2 or not course:
+        return jsonify({
+            "error": "Valid name and course are required"
+        }), 400
+
+    cert_id = str(uuid.uuid4())[:12].upper()
+
+    certificates[cert_id] = {
+        "name": name,
+        "course": course,
+        "issued": datetime.now().strftime("%d %B %Y")
+    }
+
+    return jsonify({
+        "message": "Certificate created successfully",
+        "certificate_id": cert_id,
+        "verification_url": f"/verify/{cert_id}"
+    })
+
+
+@app.route("/download/<cert_id>")
+def download_certificate(cert_id):
+    cert = certificates.get(cert_id)
+
+    if not cert:
+        return jsonify({"error": "Certificate not found"}), 404
+
+    pdf = generate_certificate(
+        cert["name"],
+        cert["course"],
+        cert_id
+    )
+
+    return send_file(
+        pdf,
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=f"FinSaathi-{cert_id}.pdf"
+    )
+
+
+@app.route("/verify/<cert_id>")
+def verify_certificate(cert_id):
+    cert = certificates.get(cert_id)
+
+    if not cert:
+        return jsonify({
+            "valid": False,
+            "message": "Invalid certificate"
+        }), 404
+
+    return jsonify({
+        "valid": True,
+        "name": cert["name"],
+        "course": cert["course"],
+        "issued": cert["issued"],
+        "certificate_id": cert_id
+    })
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
+python app.py
+
