@@ -1,0 +1,823 @@
+import hashlib
+import secrets
+import sqlite3
+from typing import Optional
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+app = FastAPI(title="FinSaathi API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+DB_PATH = "finsaathi.db"
+COOKIE_NAME = "finsaathi_session"
+
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    conn = get_db()
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT DEFAULT 'user',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS sessions (
+            token TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        );
+        CREATE TABLE IF NOT EXISTS kv_store (
+            user_id INTEGER NOT NULL,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            PRIMARY KEY (user_id, key)
+        );
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+init_db()
+
+
+def hash_password(password: str) -> str:
+    salt = "finsaathi_local_salt_v1"
+    return hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
+
+
+def get_current_user(request: Request) -> Optional[dict]:
+    token = request.cookies.get(COOKIE_NAME)
+    if not token:
+        return None
+    conn = get_db()
+    row = conn.execute(
+        """
+        SELECT u.id, u.name, u.email, u.role
+        FROM sessions s
+        JOIN users u ON s.user_id = u.id
+        WHERE s.token = ?
+        """,
+        (token,),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+class SignUpRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+@app.post("/api/auth/signup")
+def signup(payload: SignUpRequest, response: Response):
+    conn = get_db()
+    existing = conn.execute(
+        "SELECT id FROM users WHERE email = ?", (payload.email.lower().strip(),)
+    ).fetchone()
+    if existing:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    cur = conn.execute(
+        "INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)",
+        (
+            payload.name.strip(),
+            payload.email.lower().strip(),
+            hash_password(payload.password),
+        ),
+    )
+    user_id = cur.lastrowid
+    token = secrets.token_urlsafe(32)
+    conn.execute(
+        "INSERT INTO sessions (token, user_id) VALUES (?, ?)", (token, user_id)
+    )
+    conn.commit()
+    user = conn.execute(
+        "SELECT id, name, email, role FROM users WHERE id = ?", (user_id,)
+    ).fetchone()
+    conn.close()
+
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
+    return dict(user)
+
+
+@app.post("/api/auth/login")
+def login(payload: LoginRequest, response: Response):
+    conn = get_db()
+    user = conn.execute(
+        "SELECT id, name, email, role, password_hash FROM users WHERE email = ?",
+        (payload.email.lower().strip(),),
+    ).fetchone()
+    if not user or user["password_hash"] != hash_password(payload.password):
+        conn.close()
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    token = secrets.token_urlsafe(32)
+    conn.execute(
+        "INSERT INTO sessions (token, user_id) VALUES (?, ?)", (token, user["id"])
+    )
+    conn.commit()
+    conn.close()
+
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
+    return {
+        "id": user["id"],
+        "name": user["name"],
+        "email": user["email"],
+        "role": user["role"],
+    }
+
+
+@app.get("/api/auth/me")
+def me(request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return user
+
+
+@app.post("/api/auth/logout")
+def logout(request: Request, response: Response):
+    token = request.cookies.get(COOKIE_NAME)
+    if token:
+        conn = get_db()
+        conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+        conn.commit()
+        conn.close()
+    response.delete_cookie(COOKIE_NAME, path="/")
+    return {"ok": True}
+
+import hashlib
+import json
+import secrets
+import sqlite3
+from typing import Any, Optional
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+app = FastAPI(title="FinSaathi API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+DB_PATH = "finsaathi.db"
+COOKIE_NAME = "finsaathi_session"
+
+DEFAULT_ACADEMY = {
+    "saved": [],
+    "completed": [],
+    "in_progress": [],
+    "paths": {},
+    "certificates": [],
+}
+
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    conn = get_db()
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT DEFAULT 'user',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS sessions (
+            token TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        );
+        CREATE TABLE IF NOT EXISTS academy_progress (
+            user_id INTEGER PRIMARY KEY,
+            data TEXT NOT NULL,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        );
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+init_db()
+
+
+def hash_password(password: str) -> str:
+    salt = "finsaathi_local_salt_v1"
+    return hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
+
+
+def get_current_user(request: Request) -> Optional[dict]:
+    token = request.cookies.get(COOKIE_NAME)
+    if not token:
+        return None
+    conn = get_db()
+    row = conn.execute(
+        """
+        SELECT u.id, u.name, u.email, u.role
+        FROM sessions s
+        JOIN users u ON s.user_id = u.id
+        WHERE s.token = ?
+        """,
+        (token,),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def require_user(request: Request) -> dict:
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return user
+
+
+def get_user_academy(user_id: int) -> dict:
+    conn = get_db()
+    row = conn.execute(
+        "SELECT data FROM academy_progress WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    conn.close()
+    if not row:
+        return json.loads(json.dumps(DEFAULT_ACADEMY))
+    data = json.loads(row["data"])
+    for k, v in DEFAULT_ACADEMY.items():
+        data.setdefault(k, v)
+    return data
+
+
+def save_user_academy(user_id: int, data: dict):
+    conn = get_db()
+    conn.execute(
+        """
+        INSERT INTO academy_progress (user_id, data)
+        VALUES (?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET data = excluded.data
+        """,
+        (user_id, json.dumps(data)),
+    )
+    conn.commit()
+    conn.close()
+
+
+class SignUpRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class TogglePayload(BaseModel):
+    value: Optional[Any] = None
+
+
+# --- Auth Routes ---
+
+
+@app.post("/api/auth/signup")
+def signup(payload: SignUpRequest, response: Response):
+    conn = get_db()
+    existing = conn.execute(
+        "SELECT id FROM users WHERE email = ?", (payload.email.lower().strip(),)
+    ).fetchone()
+    if existing:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    # First registered user becomes admin automatically
+    count = conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
+    role = "admin" if count == 0 else "user"
+
+    cur = conn.execute(
+        "INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)",
+        (
+            payload.name.strip(),
+            payload.email.lower().strip(),
+            hash_password(payload.password),
+            role,
+        ),
+    )
+    user_id = cur.lastrowid
+    token = secrets.token_urlsafe(32)
+    conn.execute(
+        "INSERT INTO sessions (token, user_id) VALUES (?, ?)", (token, user_id)
+    )
+    conn.commit()
+    user = conn.execute(
+        "SELECT id, name, email, role FROM users WHERE id = ?", (user_id,)
+    ).fetchone()
+    conn.close()
+
+    response.set_cookie(
+        key=COOKIE_NAME, value=token, httponly=True, samesite="lax", path="/"
+    )
+    return dict(user)
+
+
+@app.post("/api/auth/login")
+def login(payload: LoginRequest, response: Response):
+    conn = get_db()
+    user = conn.execute(
+        "SELECT id, name, email, role, password_hash FROM users WHERE email = ?",
+        (payload.email.lower().strip(),),
+    ).fetchone()
+    if not user or user["password_hash"] != hash_password(payload.password):
+        conn.close()
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    token = secrets.token_urlsafe(32)
+    conn.execute(
+        "INSERT INTO sessions (token, user_id) VALUES (?, ?)", (token, user["id"])
+    )
+    conn.commit()
+    conn.close()
+
+    response.set_cookie(
+        key=COOKIE_NAME, value=token, httponly=True, samesite="lax", path="/"
+    )
+    return {
+        "id": user["id"],
+        "name": user["name"],
+        "email": user["email"],
+        "role": user["role"],
+    }
+
+
+@app.get("/api/auth/me")
+@app.get("/api/me")
+def me(request: Request):
+    return require_user(request)
+
+
+@app.post("/api/auth/logout")
+def logout(request: Request, response: Response):
+    token = request.cookies.get(COOKIE_NAME)
+    if token:
+        conn = get_db()
+        conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+        conn.commit()
+        conn.close()
+    response.delete_cookie(COOKIE_NAME, path="/")
+    return {"ok": True}
+
+
+# --- Academy Progress Routes ---
+
+
+@app.get("/api/academy/me")
+def academy_me(request: Request):
+    user = require_user(request)
+    return get_user_academy(user["id"])
+
+
+@app.post("/api/academy/videos/{video_id}/start")
+def start_video(video_id: str, request: Request):
+    user = require_user(request)
+    data = get_user_academy(user["id"])
+    if video_id not in data["completed"] and video_id not in data["in_progress"]:
+        data["in_progress"].append(video_id)
+    save_user_academy(user["id"], data)
+    return {"ok": True}
+
+
+@app.post("/api/academy/videos/{video_id}/{action}")
+def toggle_video(
+    video_id: str, action: str, request: Request, payload: Optional[TogglePayload] = None
+):
+    user = require_user(request)
+    data = get_user_academy(user["id"])
+
+    bucket = (
+        "saved"
+        if action in ("save", "saved", "bookmark")
+        else "completed"
+        if action in ("complete", "completed")
+        else None
+    )
+    if not bucket:
+        raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")
+
+    should_add = (
+        bool(payload.value)
+        if (payload and payload.value is not None)
+        else (video_id not in data[bucket])
+    )
+
+    if should_add and video_id not in data[bucket]:
+        data[bucket].append(video_id)
+        if bucket == "completed" and video_id in data["in_progress"]:
+            data["in_progress"].remove(video_id)
+    elif not should_add and video_id in data[bucket]:
+        data[bucket].remove(video_id)
+
+    save_user_academy(user["id"], data)
+    return {"ok": True}
+
+import asyncio
+import hashlib
+import json
+import os
+import secrets
+import sqlite3
+from typing import Any, List, Optional
+import httpx
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+
+app = FastAPI(title="FinSaathi API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+DB_PATH = "finsaathi.db"
+COOKIE_NAME = "finsaathi_session"
+
+DEFAULT_ACADEMY = {
+    "saved": [],
+    "completed": [],
+    "in_progress": [],
+    "paths": {},
+    "certificates": [],
+}
+
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    conn = get_db()
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT DEFAULT 'user',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS sessions (
+            token TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        );
+        CREATE TABLE IF NOT EXISTS academy_progress (
+            user_id INTEGER PRIMARY KEY,
+            data TEXT NOT NULL,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        );
+        CREATE TABLE IF NOT EXISTS chat_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        );
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+init_db()
+
+
+def hash_password(password: str) -> str:
+    salt = "finsaathi_local_salt_v1"
+    return hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
+
+
+def get_current_user(request: Request) -> Optional[dict]:
+    token = request.cookies.get(COOKIE_NAME)
+    if not token:
+        return None
+    conn = get_db()
+    row = conn.execute(
+        """
+        SELECT u.id, u.name, u.email, u.role
+        FROM sessions s
+        JOIN users u ON s.user_id = u.id
+        WHERE s.token = ?
+        """,
+        (token,),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def require_user(request: Request) -> dict:
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return user
+
+
+def get_user_academy(user_id: int) -> dict:
+    conn = get_db()
+    row = conn.execute(
+        "SELECT data FROM academy_progress WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    conn.close()
+    if not row:
+        return json.loads(json.dumps(DEFAULT_ACADEMY))
+    data = json.loads(row["data"])
+    for k, v in DEFAULT_ACADEMY.items():
+        data.setdefault(k, v)
+    return data
+
+
+def save_user_academy(user_id: int, data: dict):
+    conn = get_db()
+    conn.execute(
+        """
+        INSERT INTO academy_progress (user_id, data)
+        VALUES (?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET data = excluded.data
+        """,
+        (user_id, json.dumps(data)),
+    )
+    conn.commit()
+    conn.close()
+
+
+class SignUpRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class TogglePayload(BaseModel):
+    value: Optional[Any] = None
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatRequest(BaseModel):
+    message: str
+    language: Optional[str] = "en"
+    history: Optional[List[ChatMessage]] = []
+
+
+# --- Auth Routes ---
+
+
+@app.post("/api/auth/signup")
+def signup(payload: SignUpRequest, response: Response):
+    conn = get_db()
+    existing = conn.execute(
+        "SELECT id FROM users WHERE email = ?", (payload.email.lower().strip(),)
+    ).fetchone()
+    if existing:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    count = conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
+    role = "admin" if count == 0 else "user"
+
+    cur = conn.execute(
+        "INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)",
+        (
+            payload.name.strip(),
+            payload.email.lower().strip(),
+            hash_password(payload.password),
+            role,
+        ),
+    )
+    user_id = cur.lastrowid
+    token = secrets.token_urlsafe(32)
+    conn.execute(
+        "INSERT INTO sessions (token, user_id) VALUES (?, ?)", (token, user_id)
+    )
+    conn.commit()
+    user = conn.execute(
+        "SELECT id, name, email, role FROM users WHERE id = ?", (user_id,)
+    ).fetchone()
+    conn.close()
+
+    response.set_cookie(
+        key=COOKIE_NAME, value=token, httponly=True, samesite="lax", path="/"
+    )
+    return dict(user)
+
+
+@app.post("/api/auth/login")
+def login(payload: LoginRequest, response: Response):
+    conn = get_db()
+    user = conn.execute(
+        "SELECT id, name, email, role, password_hash FROM users WHERE email = ?",
+        (payload.email.lower().strip(),),
+    ).fetchone()
+    if not user or user["password_hash"] != hash_password(payload.password):
+        conn.close()
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    token = secrets.token_urlsafe(32)
+    conn.execute(
+        "INSERT INTO sessions (token, user_id) VALUES (?, ?)", (token, user["id"])
+    )
+    conn.commit()
+    conn.close()
+
+    response.set_cookie(
+        key=COOKIE_NAME, value=token, httponly=True, samesite="lax", path="/"
+    )
+    return {
+        "id": user["id"],
+        "name": user["name"],
+        "email": user["email"],
+        "role": user["role"],
+    }
+
+
+@app.get("/api/auth/me")
+@app.get("/api/me")
+def me(request: Request):
+    return require_user(request)
+
+
+@app.post("/api/auth/logout")
+def logout(request: Request, response: Response):
+    token = request.cookies.get(COOKIE_NAME)
+    if token:
+        conn = get_db()
+        conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+        conn.commit()
+        conn.close()
+    response.delete_cookie(COOKIE_NAME, path="/")
+    return {"ok": True}
+
+
+# --- Academy Progress Routes ---
+
+
+@app.get("/api/academy/me")
+def academy_me(request: Request):
+    user = require_user(request)
+    return get_user_academy(user["id"])
+
+
+@app.post("/api/academy/videos/{video_id}/start")
+def start_video(video_id: str, request: Request):
+    user = require_user(request)
+    data = get_user_academy(user["id"])
+    if video_id not in data["completed"] and video_id not in data["in_progress"]:
+        data["in_progress"].append(video_id)
+    save_user_academy(user["id"], data)
+    return {"ok": True}
+
+
+@app.post("/api/academy/videos/{video_id}/{action}")
+def toggle_video(
+    video_id: str, action: str, request: Request, payload: Optional[TogglePayload] = None
+):
+    user = require_user(request)
+    data = get_user_academy(user["id"])
+
+    bucket = (
+        "saved"
+        if action in ("save", "saved", "bookmark")
+        else "completed"
+        if action in ("complete", "completed")
+        else None
+    )
+    if not bucket:
+        raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")
+
+    should_add = (
+        bool(payload.value)
+        if (payload and payload.value is not None)
+        else (video_id not in data[bucket])
+    )
+
+    if should_add and video_id not in data[bucket]:
+        data[bucket].append(video_id)
+        if bucket == "completed" and video_id in data["in_progress"]:
+            data["in_progress"].remove(video_id)
+    elif not should_add and video_id in data[bucket]:
+        data[bucket].remove(video_id)
+
+    save_user_academy(user["id"], data)
+    return {"ok": True}
+
+
+# --- AI Assistant Routes ---
+
+
+@app.get("/api/assistant/history")
+def get_chat_history(request: Request):
+    user = require_user(request)
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT role, content FROM chat_history WHERE user_id = ? ORDER BY id ASC LIMIT 50",
+        (user["id"],),
+    ).fetchall()
+    conn.close()
+    return {"messages": [dict(r) for r in rows]}
+
+
+@app.delete("/api/assistant/history")
+def clear_chat_history(request: Request):
+    user = require_user(request)
+    conn = get_db()
+    conn.execute("DELETE FROM chat_history WHERE user_id = ?", (user["id"],))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+def offline_finance_reply(question: str) -> str:
+    q = question.lower()
+    if "sip" in q:
+        return (
+            "**SIP (Systematic Investment Plan)** lets you invest a fixed amount (starting at ₹500/month) "
+            "into mutual funds regularly.\n"
+            "- **Rupee Cost Averaging:** You buy more units when markets dip and fewer when prices rise.\n"
+            "- **Compounding:** Even ₹5,000/month at 12% p.a. grows to ~₹11.6 lakh in 10 years.\n"
+            "- **Tip:** Set `GEMINI_API_KEY` in your backend terminal for live custom AI answers!"
+        )
+    if "upi" in q or "scam" in q or "fraud" in q:
+        return (
+            "**UPI Safety Essentials:**\n"
+            "- **Never enter your UPI PIN to receive money**—PINs are strictly for sending money.\n"
+            "- **Verify the receiver name** on the payment screen before approving.\n"
+            "- **Avoid unknown QR codes or screen-sharing apps** claiming refunds or KYC updates."
+        )
+    if "interest" in q or "compound" in q:
+        return (
+            "**Simple vs. Compound Interest:**\n"
+            "- **Simple Interest:** Earned only on your original principal (`P × R × T / 100`).\n"
