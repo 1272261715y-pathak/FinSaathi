@@ -1,0 +1,14 @@
+import { ApiError } from "/src/lib/api.ts";
+export function errorText(e) {
+	if (e instanceof ApiError) {
+		const detail = e.body?.detail;
+		if (typeof detail === "string") return detail;
+		if (Array.isArray(detail)) {
+			return detail.map((d) => typeof d === "object" && d && "msg" in d ? String(d.msg) : String(d)).join(", ");
+		}
+		if (detail) return String(detail);
+	}
+	return "Something went wrong. Please try again.";
+}
+
+//# sourceMappingURL=data:application/json;base64,eyJtYXBwaW5ncyI6IkFBQUEsU0FBUyxnQkFBZ0I7QUFFekIsT0FBTyxTQUFTLFVBQVUsR0FBb0I7Q0FDNUMsSUFBSSxhQUFhLFVBQVU7RUFDekIsTUFBTSxTQUFVLEVBQUUsTUFBc0M7RUFDeEQsSUFBSSxPQUFPLFdBQVcsVUFBVSxPQUFPO0VBQ3ZDLElBQUksTUFBTSxRQUFRLE1BQU0sR0FBRztHQUN6QixPQUFPLE9BQ0osS0FBSyxNQUFPLE9BQU8sTUFBTSxZQUFZLEtBQUssU0FBUyxJQUFJLE9BQVEsRUFBdUIsR0FBRyxJQUFJLE9BQU8sQ0FBQyxDQUFFLENBQUMsQ0FDeEcsS0FBSyxJQUFJO0VBQ2Q7RUFDQSxJQUFJLFFBQVEsT0FBTyxPQUFPLE1BQU07Q0FDbEM7Q0FDQSxPQUFPO0FBQ1QiLCJuYW1lcyI6W10sInNvdXJjZXMiOlsiZXJyb3JzLnRzIl0sInZlcnNpb24iOjMsInNvdXJjZXNDb250ZW50IjpbImltcG9ydCB7IEFwaUVycm9yIH0gZnJvbSBcIkAvbGliL2FwaVwiO1xuXG5leHBvcnQgZnVuY3Rpb24gZXJyb3JUZXh0KGU6IHVua25vd24pOiBzdHJpbmcge1xuICBpZiAoZSBpbnN0YW5jZW9mIEFwaUVycm9yKSB7XG4gICAgY29uc3QgZGV0YWlsID0gKGUuYm9keSBhcyB7IGRldGFpbD86IHVua25vd24gfSB8IG51bGwpPy5kZXRhaWw7XG4gICAgaWYgKHR5cGVvZiBkZXRhaWwgPT09IFwic3RyaW5nXCIpIHJldHVybiBkZXRhaWw7XG4gICAgaWYgKEFycmF5LmlzQXJyYXkoZGV0YWlsKSkge1xuICAgICAgcmV0dXJuIGRldGFpbFxuICAgICAgICAubWFwKChkKSA9PiAodHlwZW9mIGQgPT09IFwib2JqZWN0XCIgJiYgZCAmJiBcIm1zZ1wiIGluIGQgPyBTdHJpbmcoKGQgYXMgeyBtc2c6IHVua25vd24gfSkubXNnKSA6IFN0cmluZyhkKSkpXG4gICAgICAgIC5qb2luKFwiLCBcIik7XG4gICAgfVxuICAgIGlmIChkZXRhaWwpIHJldHVybiBTdHJpbmcoZGV0YWlsKTtcbiAgfVxuICByZXR1cm4gXCJTb21ldGhpbmcgd2VudCB3cm9uZy4gUGxlYXNlIHRyeSBhZ2Fpbi5cIjtcbn1cbiJdfQ==
